@@ -1,0 +1,186 @@
+# Librarian 配置文件 — 路径 + 权重 + 阈值
+
+# ── 路径 ─────────────────────────────────────────
+paths:
+  obsidian_vault: "D:/obsidian/1"
+  obsidian_wiki: "D:/obsidian/1/wiki"
+  obsidian_raw: "D:/obsidian/1/raw"
+  obsidian_curated: "D:/obsidian/1/curated"
+  obsidian_archive: "D:/obsidian/1/archive"
+  data_dir: "D:/Claude code/获取信息/data"
+  log_dir: "D:/Claude code/获取信息/logs"
+  librarian_dir: "D:/Claude code/librarian"
+  librarian_logs: "D:/Claude code/librarian/logs"
+  index_dir: "D:/Claude code/librarian/indexes"
+
+# ── 数据源 ───────────────────────────────────────
+sources:
+  simon:
+    url: "https://simonwillison.net/atom/entries/"
+    max_articles: 5
+  github:
+    # 多个细分 query，按创建时间排序，抓早期项目
+    queries:
+      - "agent framework tool calling"
+      - "mcp server protocol"
+      - "rag retrieval embedding"
+      - "llm inference deployment"
+    min_stars: 10
+    per_query: 2
+    sort: "updated"
+  hn:
+    # 多个 query，提高门槛
+    queries:
+      - "Show HN: agent"
+      - "Show HN: llm"
+      - "agent memory retrieval"
+      - "mcp protocol"
+    min_points: 10
+    per_query: 2
+    tags: "show_hn,story"
+  arxiv:
+    # 论文源：agent + LLM
+    queries:
+      - "agent reasoning planning"
+      - "retrieval augmented generation"
+      - "large language model tool use"
+    max_results: 5
+    per_query: 3
+
+# ── 去重 ─────────────────────────────────────────
+dedup:
+  title_similarity_threshold: 0.85
+  url_exact_match: true
+
+# ── 领域自适应摘要 ──────────────────────────────────
+summarizer:
+  model: "deepseek-chat"
+  temperature: 0.3
+  max_tokens: 8192
+  timeout_seconds: 180
+  # 自动识别领域，按领域给摘要
+  domains:
+    - "agent"
+    - "其他"
+
+# ── 关键词检索权重 ─────────────────────────────────
+keyword:
+  weight_tag: 0.35
+  weight_title: 0.30
+  weight_core_content: 0.20
+  weight_summary: 0.15
+
+# ── 权威度 + 时效 ─────────────────────────────────
+ranking:
+  authority_scale: 6
+  authority_max_boost: 0.5
+  half_life_days: 30
+  time_decay_floor: 0.3
+  max_results: 8
+
+# ── 混合检索 ─────────────────────────────────────
+hybrid:
+  keyword_weight: 0.4
+  semantic_weight: 0.6
+
+# ── 三层索引 ──────────────────────────────────────
+index:
+  core_dirs:
+    - "wiki"
+    - "curated"
+    - "raw/agent/手动"
+    - "raw/其他/手动"
+  core_weight: 1.5
+  recent_days: 7
+  recent_weight: 1.0
+  archive_weight: 0.0
+  embedding_model: "paraphrase-multilingual-MiniLM-L12-v2"
+  hf_mirror: "https://hf-mirror.com"
+  article_split_pattern: "***"
+  doc_split_pattern: "## "
+
+# ── 策展 ─────────────────────────────────────────
+curation:
+  min_articles: 15
+  refresh_days: 14
+  consecutive_min_days: 3
+  consecutive_min_count: 8
+  consecutive_refresh_days: 7
+  signal_ratio_threshold: 0.3
+  signal_min_articles: 5
+  signal_refresh_days: 5
+  max_words: 2000
+
+# ── 归档 ─────────────────────────────────────────
+archive:
+  days_threshold: 7
+
+# ── 通知 ─────────────────────────────────────────
+notify:
+  feishu:
+    company:
+      app_id: ""
+      app_secret: ""
+      chat_id: ""
+    personal:
+      app_id: ""
+      app_secret: ""
+      chat_id: ""
+  wechat:
+    data_dir: ""
+    session: ""
+
+# ── 搜索画像 ─────────────────────────────────────
+profile:
+  search_window_days: 7
+  blindspot_threshold: 2
+  max_boost_tags: 8
+
+# ── 会话 ─────────────────────────────────────────
+session:
+  max_turns: 10
+  context_turns: 3
+  session_dir: "D:/Claude code/librarian/sessions"
+
+# ── 知识图谱 ─────────────────────────────────────
+graph:
+  path: "D:/obsidian/1/curated/knowledge-graph.json"
+  relation_types:
+    - "依赖"
+    - "构成"
+    - "输入来源"
+    - "运行位置"
+    - "产出"
+    - "使用"
+    - "关联"
+
+# ── 多 Agent 策展 ────────────────────────────────
+multi_agent_curation:
+  enabled: true           # true = 三人小组, false = 旧 curator+wiki_updater
+  dry_run: false          # true = Wiki Agent 不实际写入
+
+# ── wiki 更新 ────────────────────────────────────
+wiki_updater:
+  min_relevance: "核心相关"
+  enabled: true
+
+# 领域 → wiki 页面映射
+wiki_pages:
+  agent:
+    - "wiki/agent/架构/ReAct与变体.md"
+    - "wiki/agent/架构/图架构.md"
+    - "wiki/agent/架构/记忆架构.md"
+    - "wiki/agent/工具/MCP协议.md"
+    - "wiki/agent/工具/调用原理.md"
+    - "wiki/agent/检索/_index.md"
+    - "wiki/agent/评估/评估体系.md"
+    - "wiki/agent/_index.md"
+
+# raw 目录结构 — 每个领域有 每日/ + 手动/
+raw_domains:
+  agent:
+    daily: "raw/agent/每日"
+    manual: "raw/agent/手动"
+  其他:
+    daily: "raw/其他/每日"
+    manual: "raw/其他/手动"

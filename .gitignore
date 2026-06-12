@@ -1,0 +1,19 @@
+# 凭证
+.env
+
+# 数据文件（含爬取内容、用户信息）
+articles.json
+indexes/
+logs/
+sessions/
+curated/
+__pycache__/
+*.pyc
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 运行状态
+.pending_fetches.json
+.index_state.json
