@@ -82,6 +82,13 @@ def run_curation_pipeline(articles: list[dict], date_str: str,
     print(f"{'='*50}")
 
     _save_and_return(state, date_str)
+
+    try:
+        from multi_agent_curation.reviewer import review_date
+        review_date(date_str)
+    except Exception as e:
+        print(f"  ⚠️ 评测失败: {e}")
+
     return state.to_dict()
 
 

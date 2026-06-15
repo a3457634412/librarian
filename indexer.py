@@ -36,7 +36,6 @@ class Indexer:
             from sentence_transformers import SentenceTransformer
             self.model = SentenceTransformer(
                 self.config["index"]["embedding_model"],
-                local_files_only=True,
             )
         return self.model
 

@@ -20,7 +20,12 @@ class KnowledgeGraph:
     def _load(self) -> dict:
         if self.path.exists():
             with open(self.path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            empty = self._empty()
+            for key in empty:
+                if key not in data:
+                    data[key] = empty[key]
+            return data
         return self._empty()
 
     def _empty(self) -> dict:

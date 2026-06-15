@@ -12,6 +12,7 @@ paths:
   librarian_dir: "D:/Claude code/librarian"
   librarian_logs: "D:/Claude code/librarian/logs"
   index_dir: "D:/Claude code/librarian/indexes"
+  cc_connect: "D:/Claude code/下载/npm-global/cc-connect.cmd"
 
 # ── 数据源 ───────────────────────────────────────
 sources:

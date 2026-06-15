@@ -38,7 +38,7 @@ class Notifier:
             "content": content_str,
         }).encode()
 
-        url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id"
+        url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
         req = Request(url, data=body, headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
@@ -56,12 +56,15 @@ class Notifier:
             print(f"  [飞书] 发送失败: {e}")
             return False
 
+    def _cc_connect_path(self) -> str:
+        return self.config.get("paths", {}).get("cc_connect", "cc-connect")
+
     def send_wechat(self, text: str) -> bool:
         cfg = self.config["notify"]["wechat"]
         try:
             result = subprocess.run(
                 [
-                    "cc-connect", "send",
+                    self._cc_connect_path(), "send",
                     "--data-dir", cfg["data_dir"],
                     "-s", cfg["session"],
                     "-m", text,

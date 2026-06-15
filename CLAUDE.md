@@ -123,9 +123,10 @@ librarian/
 │   ├── __init__.py
 │   ├── state.py            ← CurationState — 三 Agent 共享状态
 │   ├── llm.py              ← 共享 LLM 调用 + 4层JSON解析兜底
-│   ├── tools.py            ← read_wiki / search_wiki / write_wiki / get_wiki_index
+│   ├── tools.py            ← read_wiki / search_wiki(LLM匹配+关键词降级) / write_wiki / get_wiki_index
 │   ├── agents.py           ← Signal / Curation / Wiki 三个 Agent 的 prompt + 逻辑
 │   ├── graph.py            ← 编排入口 run_curation_pipeline()
+│   ├── reviewer.py         ← 千问评测器 (每天管线跑完后自动评级)
 │   └── logger.py           ← 每 Agent I/O 日志 + decisions_summary.md
 ├── contradiction.py        ← 碰撞检测（新文章 vs wiki/综述 → 冲突/补充/替代）
 ├── archiver.py             ← >7天文章归档
@@ -350,6 +351,11 @@ def fetch_营养(url: str, max_articles: int = 5) -> list[dict]:
 **现象：** 死代码 `[ -z "${filter_relevance+x}" ]` + 空串覆盖
 **解决：** 用 `filter_explicit` flag 区分"没设置过"和"显式设空"
 
+### 12. sentence-transformers 本地模型不适合 cron 场景 (2026-06-12)
+**现象：** `search_wiki` 改语义检索后首次调用卡 5 分钟+，cron 每天是新进程，每天都卡
+**根因：** `paraphrase-multilingual-MiniLM-L12-v2` 120MB 模型需从 HuggingFace 镜像下载/加载，国内网络不稳定。且 DeepSeek API 没有 embeddings 端点，不能用 API 做向量化
+**解决：** 改用 DeepSeek Chat 做 LLM 匹配——传 wiki 页面目录 + 查询词，LLM 返回匹配路径。零启动成本，每次 ~2s。失败降级关键词搜索
+
 ## 设计决策
 
 - **三文件分离**：改参数只动 config.sh，改逻辑只动 engine.sh，入口不动
@@ -396,4 +402,5 @@ def fetch_营养(url: str, max_articles: int = 5) -> list[dict]:
 - **config.py 统一配置模块** (2026-06-01)：消除 18 处重复的 `load_config()` 函数定义，所有模块从 `config.py` 单点导入 `config` + `DEEPSEEK_API_KEY`。api key 不再靠 shell 环境变量传递，统一由 `config.py` 加载 `.env` 后注入 os.environ
 - **三人小组策展替代旧策展+wiki更新** (2026-06-03)：Signal Agent（提炼信号）→ Curation Agent（先更新已有知识再判断新方向）→ Wiki Agent（审方案+写内容）。三个 Agent 用统一的北星——"帮助用户成为资深 Agent 工程师"。替代原来的 curator.py（阈值规则）和 wiki_updater.py.update()（逐篇 LLM 判断）
 - **策展 feature flag + 全量回退** (2026-06-03)：`config.yaml` 中 `multi_agent_curation.enabled` 控制走新/旧链路。三人小组不做逐层降级——任何 Agent 异常直接穿透到 agent.py，全量回退到旧 curator + wiki_updater。要么三个全跑通，要么全回退
-- **prompt 模板用 __PLACEHOLDER__ 替代 .format()** (2026-06-03)：prompt 中含 JSON 示例时，Python `.format()` 会把 JSON 花括号当占位符，报 `Single '}' encountered in format string`。改用 `__PLACEHOLDER__` 标记 + `.replace()` 替换，避免冲突
+- **search_wiki 用 LLM 匹配替代本地 embedding 模型** (2026-06-12)：`tools.py` 的 `search_wiki()` 优先用 DeepSeek Chat 做查询→页面匹配（传 wiki 目录 + 查询词，LLM 返回匹配路径），失败降级关键词搜索。不加载 sentence-transformers——每天 cron 是新进程，120MB 模型首次加载 30-60s，且 HuggingFace 镜像不稳定。LLM 方式零启动成本，每次 ~2s，一天 8-12 次调用成本可忽略
+- **千问评测器接入管线** (2026-06-12)：`reviewer.py` 在 `graph.py` 的 `run_curation_pipeline()` 执行完后自动调用。每天管线跑完即出质量评分，review_tracker 不断档。评测失败不阻塞主流程
