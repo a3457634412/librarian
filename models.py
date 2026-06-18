@@ -1,17 +1,15 @@
 """
 Librarian 数据模型 — Article + ArticleStore
 
-所有模块读写的唯一数据源。底层 JSON，以后可换 SQLite 而不影响调用方。
+所有模块读写的唯一数据源。底层 JSON，以后可换 SQLite。
 
-Article 生命周期:
-  ingested → tagged → indexed → archived
+Article 生命周期: ingested → tagged → curated → archived
 
 用法:
   store = ArticleStore()
-  store.ingest(raw_articles, date_str)          # fetch 产出
-  untagged = store.get_by_state("ingested")      # tagger 读取
-  store.update_tags(article_id, tag_fields)      # tagger 写入
-  store.mark_state(article_id, "tagged")
+  store.ingest(raw_articles, date_str)
+  store.update_tags(tagged_articles)
+  store.mark_state(aid, "tagged")
 """
 import json
 import hashlib
@@ -33,19 +31,14 @@ class Article:
     published_at: str = ""
 
     # tagger 产出
-    tech_tag: str = ""
-    maturity_tag: str = ""
-    relevance: str = ""
-    tech_summary: str = ""
-    trend_signal: str = ""
-    relevance_to_me: str = ""
+    domain: str = ""           # agent / 其他
+    core_content: str = ""     # 文章讲了什么 (50-100字)
+    value_judgment: str = ""   # 可信度/趋势阶段 (50-80字)
 
-    # 信号分级 (新)
-    signal_level: str = "green"
-
-    # 关联阶段
-    related_notes: list[str] = field(default_factory=list)
-    collision_verdict: str = ""
+    # 策展产出
+    curation_decision: str = ""  # skip / merge / create
+    curation_target: str = ""    # 目标 wiki 页面路径
+    curation_rationale: str = "" # 决策理由
 
     # 生命周期
     date: str = ""
@@ -108,24 +101,19 @@ class ArticleStore:
             aid = a.get("id", "")
             if aid and aid in self._articles:
                 art = self._articles[aid]
-                art.tech_tag = a.get("tech_tag", "")
-                art.maturity_tag = a.get("maturity_tag", "")
-                art.relevance = a.get("relevance", "")
-                art.tech_summary = a.get("tech_summary", "")
-                art.trend_signal = a.get("trend_signal", "")
-                art.relevance_to_me = a.get("relevance_to_me", "")
-                art.signal_level = a.get("signal_level", "green")
+                art.domain = a.get("domain", "")
+                art.core_content = a.get("core_content", "")
+                art.value_judgment = a.get("value_judgment", "")
                 art.state = "tagged"
         self._save()
 
-    def update_collision(self, article_id: str, verdict: str):
+    def update_curation(self, article_id: str, decision: str, target: str = "", rationale: str = ""):
         if article_id in self._articles:
-            self._articles[article_id].collision_verdict = verdict
-            self._save()
-
-    def add_related(self, article_id: str, notes: list[str]):
-        if article_id in self._articles:
-            self._articles[article_id].related_notes = notes
+            art = self._articles[article_id]
+            art.curation_decision = decision
+            art.curation_target = target
+            art.curation_rationale = rationale
+            art.state = "curated"
             self._save()
 
     def mark_state(self, article_id: str, new_state: str):
@@ -150,10 +138,10 @@ class ArticleStore:
     def get_by_date(self, date_str: str) -> list[Article]:
         return [a for a in self._articles.values() if a.date == date_str]
 
-    def get_by_tag(self, tech_tag: str, max_age_days: int = None) -> list[Article]:
+    def get_by_domain(self, domain: str, max_age_days: int = None) -> list[Article]:
         result = []
         for a in self._articles.values():
-            if tech_tag.lower() in a.tech_tag.lower():
+            if a.domain == domain:
                 if max_age_days is None:
                     result.append(a)
                 else:
@@ -166,22 +154,12 @@ class ArticleStore:
                         pass
         return result
 
-    def get_relevant(self, date_str: str = None) -> list[Article]:
-        """取核心相关或可能相关的文章"""
-        result = []
-        for a in self._articles.values():
-            if date_str and a.date != date_str:
-                continue
-            if a.relevance in ("#核心相关", "#可能与我的部署相关"):
-                result.append(a)
-        return result
-
     def search_keyword(self, query: str) -> list[tuple[Article, float]]:
         """简单关键词搜索。返回 (Article, score) 列表"""
         keywords = query.lower().split()
         scored = []
         for a in self._articles.values():
-            text = f"{a.title} {a.tech_summary} {a.trend_signal} {a.tech_tag}".lower()
+            text = f"{a.title} {a.core_content} {a.value_judgment}".lower()
             score = sum(text.count(kw) for kw in keywords)
             if score > 0:
                 scored.append((a, score))
@@ -192,7 +170,7 @@ class ArticleStore:
         return list(self._articles.values())
 
     def stats(self) -> dict:
-        states = {"ingested": 0, "tagged": 0, "indexed": 0, "archived": 0}
+        states = {"ingested": 0, "tagged": 0, "curated": 0, "archived": 0}
         for a in self._articles.values():
             states[a.state] = states.get(a.state, 0) + 1
         return {"total": len(self._articles), "by_state": states}

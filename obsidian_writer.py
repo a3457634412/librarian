@@ -14,7 +14,7 @@ from config import config
 
 
 def write_daily_markdown(tagged_file: str, date_str: str = None):
-    """cron 批量写入 — 按领域分目录，每个领域一个文件"""
+    """cron 批量写入 — 按领域分目录"""
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
 
@@ -22,8 +22,6 @@ def write_daily_markdown(tagged_file: str, date_str: str = None):
 
     with open(tagged_file, "r", encoding="utf-8") as f:
         articles = json.load(f)
-
-    total = len(articles)
 
     # 按领域分组
     by_domain = defaultdict(list)
@@ -36,29 +34,22 @@ def write_daily_markdown(tagged_file: str, date_str: str = None):
         domain_dir.mkdir(parents=True, exist_ok=True)
         output_file = domain_dir / f"{date_str}.md"
 
-        relevant = [a for a in domain_articles if a.get("relevance_to_me") and a["relevance_to_me"] != "不直接相关"]
-
         lines = [
             "---",
             f"date: {date_str}",
             f"domain: {domain}",
             f"source: Simon Willison + GitHub Trending + Hacker News",
             f"total: {len(domain_articles)}",
-            f"relevant: {len(relevant)}",
             "---",
             "",
             f"# {date_str} {domain} 动态",
-            "",
-            f"> 共 {len(domain_articles)} 条，其中 {len(relevant)} 条与你相关",
             "",
         ]
 
         for a in domain_articles:
             core = a.get("core_content", "")
             values = a.get("value_judgment", "")
-            relevance = a.get("relevance_to_me", "")
             url = a.get("url", "")
-            points = a.get("points", 0)
             source = a.get("source", "")
 
             entry = [
@@ -74,11 +65,7 @@ def write_daily_markdown(tagged_file: str, date_str: str = None):
             if values:
                 entry.append(f"🔮 {values}")
                 entry.append("")
-            if relevance and relevance != "不直接相关":
-                entry.append(f"🎯 {relevance}")
-                entry.append("")
             entry.append(f"🔗 {url}")
-            entry.append(f"📊 {points} points")
             entry.append("")
 
             lines.extend(entry)
@@ -115,8 +102,6 @@ url: {a.get('url', '')}
 💡 {a.get('core_content', '')}
 
 🔮 {a.get('value_judgment', '')}
-
-{f'🎯 {a.get("relevance_to_me", "")}' if a.get('relevance_to_me') else ''}
 """
         filepath.write_text(content, encoding="utf-8")
         print(f"  已写入: raw/{domain}/手动/{filename}")

@@ -1,55 +1,48 @@
 """
-领域自适应摘要器 — 自动判断领域 + 三维通用摘要
+文章过滤器 + 摘要 — 只判断是不是 agent 领域，输出核心内容 + 可信度
 
-每篇文章输出:
-  domain:         agent / 营养 / 其他
-  core_content:   这篇文章讲了什么 (50-100字)
-  value_judgment: 可信度/趋势/证据强度 (50-80字)
-  relevance_to_me: 为什么你需要知道 (30-50字)
-
-目录即分类，不再打 tech_tag / maturity_tag。
+输出:
+  domain:         agent / 其他 (非 agent 丢弃)
+  core_content:   文章讲了什么 (50-100字)
+  value_judgment: 可信度/趋势阶段/证据强度 (50-80字)
 """
 import json
 import re
 from datetime import datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
-from urllib.error import URLError
 
 from config import config, DEEPSEEK_API_KEY
 
 
-SUMMARIZER_PROMPT = """你是一个知识库摘要助手。读者背景：
-- 全栈后端转 AI/Agent 开发，在维护个人 AI 助手"沈念"
-- 在维护 Obsidian 知识库（三层索引 + 混合检索 + wiki 提炼）
-- 关注 Agent 架构、RAG、MCP、LLM 工具调用，也关注营养健康
+SUMMARIZER_PROMPT = """你是知识库过滤器。只关注 Agent/LLM 领域的文章。
 
-请为每篇文章输出以下内容（JSON 格式）：
+Agent 领域范围: Agent 架构、LLM 工具调用、MCP/A2A 协议、RAG/检索增强、多 Agent 协作、Agent 评估/观测、记忆系统、推理/规划、LLM 工程化。
+
+对每篇文章输出 JSON:
 
 {
   "articles": [
     {
       "id": 0,
-      "domain": "agent / 其他",
-      "core_content": "这篇文章讲了什么核心内容，不超过100字",
-      "value_judgment": "可信度如何、处于什么阶段、有什么证据支撑，不超过80字",
-      "relevance_to_me": "为什么你需要知道，对你有什么影响，不超过50字"
+      "domain": "agent",
+      "core_content": "核心内容，不超过100字",
+      "value_judgment": "可信度/趋势阶段/证据强度，不超过80字"
     }
   ]
 }
 
-规则：
-- domain: 优先匹配已知领域（agent），都不匹配用"其他"
-- core_content: 是提炼后的核心信息，不是标题翻译
+规则:
+- domain: 只输出 "agent" 或 "其他"
+- core_content: 提炼后的核心信息，不是标题翻译
 - value_judgment: 关注信息可靠性、行业趋势阶段、数据来源质量
-- relevance_to_me: 具体到你关心的事情（agent开发/知识库建设/个人效率），无关时说"不直接相关"
 - 只输出 JSON，不要其他内容
 
 文章列表：
 """
 
 
-def _call_deepseek(prompt: str, config: dict) -> str:
+def _call_deepseek(prompt: str) -> str:
     api_key = DEEPSEEK_API_KEY
     body = {
         "model": config["summarizer"]["model"],
@@ -103,7 +96,7 @@ def _parse_response(text: str) -> list[dict]:
 
 
 def summarize(articles: list[dict]) -> list[dict]:
-    """主入口：领域判断 + 三维摘要"""
+    """主入口：领域判断 + 摘要 + 过滤非 agent"""
 
     article_text = ""
     for i, a in enumerate(articles):
@@ -116,8 +109,8 @@ def summarize(articles: list[dict]) -> list[dict]:
 
     prompt = SUMMARIZER_PROMPT + "\n" + article_text
 
-    print(f"[2/3] 领域判断 + 三维摘要 ({len(articles)} 篇)...")
-    raw_output = _call_deepseek(prompt, config)
+    print(f"  LLM 过滤 + 摘要 ({len(articles)} 篇)...")
+    raw_output = _call_deepseek(prompt)
     results = _parse_response(raw_output)
 
     if not results:
@@ -130,35 +123,32 @@ def summarize(articles: list[dict]) -> list[dict]:
     # 合并结果
     merged = []
     for a in articles:
-        item = {**a}
+        idx = articles.index(a)
         match = (
-            next((r for r in results if str(r.get("id", -1)) == str(articles.index(a))), None)
+            next((r for r in results if str(r.get("id", -1)) == str(idx)), None)
             or next((r for r in results if r.get("title", "") == a.get("title", "")), None)
         )
+        item = {**a}
         if match:
             item["domain"] = match.get("domain", "其他")
             item["core_content"] = match.get("core_content", "")
             item["value_judgment"] = match.get("value_judgment", "")
-            item["relevance_to_me"] = match.get("relevance_to_me", "")
         else:
             item["domain"] = "其他"
             item["core_content"] = ""
             item["value_judgment"] = ""
-            item["relevance_to_me"] = ""
         merged.append(item)
 
-    print(f"  摘要完成: {len(merged)} 篇")
-    # 打印领域分布
-    from collections import Counter
-    domain_counts = Counter(a["domain"] for a in merged)
-    for d, c in domain_counts.items():
-        print(f"    {d}: {c} 篇")
+    # 只保留 agent 领域
+    agent_articles = [a for a in merged if a.get("domain") == "agent"]
+    skipped = len(merged) - len(agent_articles)
+    print(f"  agent: {len(agent_articles)} 篇, 丢弃: {skipped} 篇")
 
-    return merged
+    return agent_articles
 
 
 def save_tagged(articles: list[dict], date_str: str = None):
-    """兼容旧接口名 — 保存摘要结果"""
+    """保存过滤后的结果到 tagged JSON"""
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
     data_dir = Path(config["paths"]["data_dir"])
@@ -167,7 +157,7 @@ def save_tagged(articles: list[dict], date_str: str = None):
     tagged_file = data_dir / f"{date_str}_tagged.json"
     with open(tagged_file, "w", encoding="utf-8") as f:
         json.dump(articles, f, ensure_ascii=False, indent=2)
-    print(f"  已保存: {tagged_file}")
+    print(f"  已保存: {tagged_file} ({len(articles)} 篇)")
     return tagged_file
 
 
