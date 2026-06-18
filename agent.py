@@ -1,20 +1,10 @@
 """
 Librarian Agent — 主编排器
 
-所有新文章（cron 抓取 / 手动投喂）统一走 process_incoming():
-  1. LLM 打标签
-  2. 写入 Obsidian
-  3. 推送通知（可选）
-  4. 标签统计 + 异常检测 + 关联笔记
-  5. wiki 提炼
-  6. 策展检测
-  7. 冲突检测
-  8. 归档
-  9. 增量索引
-  10. 知识图谱
+管线: 抓取 → tagger (过滤+摘要) → 写 Obsidian → 策展 → 归档
 
 用法:
-  python agent.py                        # 完整 cron 运行（今天）
+  python agent.py                        # 完整 cron 运行
   python agent.py 2026-05-30             # 指定日期
   python agent.py --manual --url "..."   # 手动投喂 URL
   python agent.py --manual --text "标题" "内容"  # 手动投喂文本
@@ -24,46 +14,31 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from urllib.request import Request, urlopen
 
 from config import config
 
 import fetch_sources
 import tagger
 import obsidian_writer
-import notifier
-import processor
 import curator
-import contradiction
 import archiver
-import indexer
-import graph
-import wiki_updater
 from models import ArticleStore
 
 
-
 def process_incoming(articles: list[dict], date_str: str, store: ArticleStore = None,
-                     skip_notify: bool = False, tagged_file: str = None):
+                     skip_write: bool = False, tagged_file: str = None):
     """
     统一处理入口 — 所有新文章无论来源都走这里。
-
-    articles: 原始文章列表（未打标签）
-    date_str: 日期
-    store: ArticleStore 实例（可选，不传则新建）
-    skip_notify: 手动投喂时不推送
-    tagged_file: 已有 tagged JSON 路径（cron 场景重用）
     """
     if store is None:
         store = ArticleStore()
 
-
-    # ── 1. 打标签 ──
-    print(f"  LLM 打标签 ({len(articles)} 篇)...")
-    tagged = tagger.tag_articles(articles)
+    # ── 1. 过滤 + 摘要 (只保留 agent 领域) ──
+    print(f"  tagger: 过滤 + 摘要 ({len(articles)} 篇)...")
+    tagged = tagger.summarize(articles)
     if not tagged:
-        print("  ⚠️ 标记失败，使用原始数据")
-        tagged = articles
+        print("  ⚠️ 无 agent 领域文章")
+        return []
 
     tagged_for_store = []
     for a in tagged:
@@ -74,136 +49,31 @@ def process_incoming(articles: list[dict], date_str: str, store: ArticleStore = 
     if tagged_for_store:
         store.update_tags(tagged_for_store)
 
-    # 保存 tagged JSON
     if tagged_file is None:
         tagged_file = str(Path(config["paths"]["data_dir"]) / f"{date_str}_tagged.json")
     json.dump(tagged, open(tagged_file, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
     # ── 2. 写入 Obsidian ──
-    print(f"  写入 Obsidian...")
-    if not skip_notify:
+    if not skip_write:
+        print("  写入 Obsidian...")
         obsidian_writer.write_daily_markdown(tagged_file, date_str)
     else:
         obsidian_writer.write_manual_markdown(tagged, date_str)
 
-    # ── 3. 推送（仅 cron） ──
-    if not skip_notify:
-        try:
-            n = notifier.Notifier()
-            n.push_daily_summary(tagged_file, date_str)
-        except Exception as e:
-            print(f"  ⚠️ 推送失败: {e}")
-
-    # ── 4. 处理 + 关联 ──
+    # ── 3. 策展 ──
     try:
-        proc = processor.Processor()
-        proc.process(tagged_file, date_str)
+        cur = curator.Curator()
+        cur.curate(tagged, date_str)
     except Exception as e:
-        print(f"  ⚠️ 处理失败: {e}")
+        print(f"  ⚠️ 策展失败: {e}")
 
-    # ── 5. wiki 提炼 + 策展 ──
-    _run_curation_pipeline(tagged, date_str, tagged_file)
-
-    # ── 5.5. 全量维护 [[双向链接]]（不管有没有新文章，每天固定修）──
-    try:
-        wu = wiki_updater.WikiUpdater()
-        wu.maintain_all_links()
-    except Exception as e:
-        print(f"  ⚠️ 自动连线失败: {e}")
-
-    # ── 7. 冲突检测 ──
-    try:
-        cd = contradiction.ContradictionDetector()
-        findings = cd.detect(tagged_file, date_str)
-        if findings:
-            print(f"  冲突检测: {len(findings)} 条")
-    except Exception as e:
-        print(f"  ⚠️ 冲突检测失败: {e}")
-
-    # ── 8. 归档 ──
+    # ── 4. 归档 ──
     try:
         archiver.archive(date_str)
     except Exception as e:
         print(f"  ⚠️ 归档失败: {e}")
 
-    # ── 9. 增量索引 ──
-    try:
-        idx = indexer.Indexer()
-        idx.build_index("--incremental")
-    except Exception as e:
-        print(f"  ⚠️ 索引失败: {e}")
-
-    # ── 10. 知识图谱 ──
-    try:
-        kg = graph.KnowledgeGraph(config["graph"]["path"])
-        for a in tagged[:3]:
-            domain = a.get("domain", "其他")
-            kg.add_triple("资料管理员", "收录", a["title"], confidence=5, evidence=f"{date_str} {domain}")
-        kg.save()
-    except Exception as e:
-        print(f"  ⚠️ 知识图谱更新失败: {e}")
-
     return tagged
-
-
-def _run_curation_pipeline(tagged: list[dict], date_str: str, tagged_file: str):
-    """策展决策链 — feature flag 控制走新/旧逻辑"""
-    use_multi = config.get("multi_agent_curation", {}).get("enabled", False)
-
-    if not use_multi:
-        # ── 旧逻辑: wiki_updater + curator ──
-        try:
-            wu = wiki_updater.WikiUpdater()
-            updates = wu.update(tagged, date_str)
-            if updates:
-                print(f"  wiki 更新: {len(updates)} 个页面")
-                for u in updates:
-                    print(f"    {u['page']}")
-        except Exception as e:
-            print(f"  ⚠️ wiki 更新失败: {e}")
-
-        try:
-            cur = curator.Curator()
-            triggered = cur.check_thresholds(date_str)
-            if triggered:
-                print(f"  触发策展: {triggered}")
-                for tag in triggered:
-                    try:
-                        cur.curate(tag, date_str)
-                    except Exception as e:
-                        print(f"  ⚠️ 策展 {tag} 失败: {e}")
-        except Exception as e:
-            print(f"  ⚠️ 策展检查失败: {e}")
-        return
-
-    # ── 新逻辑: 多 Agent 策展 ──
-    try:
-        from multi_agent_curation.graph import run_curation_pipeline
-
-        # 筛选 agent 领域的文章
-        agent_articles = [a for a in tagged if a.get("domain") == "agent"]
-        if not agent_articles:
-            agent_articles = tagged
-
-        run_curation_pipeline(
-            agent_articles, date_str,
-            dry_run=config.get("multi_agent_curation", {}).get("dry_run", False),
-        )
-    except ImportError:
-        print("  ⚠️ multi_agent_curation 模块未安装，降级到旧逻辑")
-        config.setdefault("multi_agent_curation", {})["enabled"] = False
-        _run_curation_pipeline(tagged, date_str, tagged_file)
-    except Exception as e:
-        print(f"  ⚠️ 多 Agent 策展失败: {e}")
-        import traceback
-        traceback.print_exc()
-        # 降级: 跑旧逻辑
-        try:
-            print("  → 降级到旧策展逻辑...")
-            config.setdefault("multi_agent_curation", {})["enabled"] = False
-            _run_curation_pipeline(tagged, date_str, tagged_file)
-        except Exception as fb_e:
-            print(f"  ⚠️ 降级也失败: {fb_e}")
 
 
 def manual_ingest(url: str = None, text_title: str = None, text_content: str = None):
@@ -241,7 +111,7 @@ def manual_ingest(url: str = None, text_title: str = None, text_content: str = N
         return
 
     store.ingest([article], date_str)
-    process_incoming([article], date_str, store=store, skip_notify=True)
+    process_incoming([article], date_str, store=store, skip_write=True)
     print("  手动投喂完成")
 
 
@@ -277,7 +147,7 @@ def daily_run(date_str: str = None):
 
     # ── 统一处理 ──
     print(f"\n[2/2] 处理...")
-    process_incoming(articles, date_str, store=store, skip_notify=False)
+    process_incoming(articles, date_str, store=store)
 
     print(f"\n{'='*50}")
     print(f"  完成 — {date_str}")
@@ -285,7 +155,7 @@ def daily_run(date_str: str = None):
     print(f"  ArticleStore: 共 {s['total']} 条 "
           f"(ingested:{s['by_state'].get('ingested', 0)} "
           f"tagged:{s['by_state'].get('tagged', 0)} "
-          f"indexed:{s['by_state'].get('indexed', 0)} "
+          f"curated:{s['by_state'].get('curated', 0)} "
           f"archived:{s['by_state'].get('archived', 0)})")
     print(f"{'='*50}")
 
