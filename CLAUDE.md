@@ -44,6 +44,7 @@ tagger.py (DeepSeek)
     ├─ 领域判断: agent / 其他
     ├─ core_content: 文章讲了什么
     ├─ value_judgment: 可信度/趋势
+    ├─ push_priority: 对 Agent 领域的重要程度 (high/medium/low)
     └─ 非 agent → 丢弃
     │  5-10条 agent 文章
     ▼
@@ -54,8 +55,18 @@ curator.py (单 Agent, DeepSeek)
     ├─ search_wiki (LLM匹配, 降级关键词)
     ├─ read_wiki_page (读全文)
     ├─ 判断: skip / merge / create
+    ├─ change_significance: 对 wiki 的实际影响 (paradigm_shift/new_direction/substantial/minor/none)
     ├─ 写前护栏: 确认不重复
     └─ write_wiki_page → wiki/agent/
+    │
+    ▼
+_push_signals() — 综合 curator significance → 推送
+    ├─ 🔴 paradigm_shift → 始终推送
+    ├─ 🟡 new_direction / substantial → 推送
+    └─ ⚪ minor / none → 沉默
+    │
+    ▼
+notifier.py → 微信 (cc-connect --stdin) + 飞书 (API 直连)
     │
     ▼
 reviewer.py (千问, 独立评测)
@@ -88,9 +99,10 @@ librarian/
 ├── articles.json            ← ArticleStore 持久化
 │
 ├── fetch_sources.py        ← 四路抓取 + 去重 + retry + pending
-├── tagger.py               ← DeepSeek 过滤 + 摘要 (agent only)
+├── tagger.py               ← DeepSeek 过滤 + 摘要 + push_priority (agent only)
 ├── obsidian_writer.py      → Obsidian .md
-├── curator.py              ← 单 Agent 策展 (search→read→decide→write)
+├── curator.py              ← 单 Agent 策展 + change_significance
+├── notifier.py             ← 推送 (微信 cc-connect + 飞书 API)
 ├── archiver.py             ← >7天归档
 ├── searcher.py             ← 统一检索入口 (LLM匹配)
 │
@@ -113,6 +125,8 @@ librarian/
 ```bash
 echo "DEEPSEEK_API_KEY=sk-xxx" > "D:/Claude code/librarian/.env"
 echo "QWEN_API_KEY=sk-xxx" >> "D:/Claude code/librarian/.env"
+echo "FEISHU_APP_ID=cli-xxx" >> "D:/Claude code/librarian/.env"
+echo "FEISHU_APP_SECRET=xxx" >> "D:/Claude code/librarian/.env"
 python -c "from config import DEEPSEEK_API_KEY; print('OK' if DEEPSEEK_API_KEY.startswith('sk-') else 'MISSING')"
 ```
 
@@ -130,9 +144,10 @@ Windows 计划任务 7:30 → `获取信息/daily_run.sh` → `agent.py`:
 
 ```
 补抓 pending → 四路抓取 + 去重
-  → tagger (过滤: agent only + 摘要)
+  → tagger (过滤: agent only + 摘要 + push_priority)
   → 写入 raw/agent/每日/
-  → 策展 (单 Agent: search→read→decide→write)
+  → 策展 (单 Agent: search→read→decide→write + push_digest)
+  → 推送 (综合 tagger priority + curator significance → 微信+飞书)
   → 评测 (千问 reviewer)
   → 归档 (>7天)
 ```
@@ -187,6 +202,10 @@ Arxiv          → 论文，追新范式
 - **正文 wikilink** (2026-06-20) — curator 写内容时正文里提到已有 wiki 页面的项目/术语 → 用 [[wikilink]] 包裹，不只在末尾"## 相关"放链接
 - **3 日重复写入控制** (2026-06-20) — 目标页面 3 天内被策展更新过 → 优先 skip，除非新信息确实重大
 - **同主题页面合并** (2026-06-20) — 记忆主题 4 页 → 2 页。策展造成的碎片化需要手动定期清理
+- **推送默认沉默** (2026-06-29) — 有 substantial 以上 wiki 改动才推送，没信号不打扰。推的是 curator 写的完整摘要 (impact_scope + impact_degree + push_digest)，看完不用翻 wiki
+- **两通道推送** (2026-06-29) — 微信走 cc-connect --stdin，飞书走 API 直连。公司飞书已移除（app 不在群里）
+- **非 agent 数据清理** (2026-06-29) — raw/其他/ + raw/other/ + wiki/其他/ 全部删除，tagger 过滤后只保留 agent 领域
+- **凭证入 .env** (2026-06-29) — 飞书 app_id/secret 从代码中移除，通过环境变量读取
 
 ## 遇到过的坑
 

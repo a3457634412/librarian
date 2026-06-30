@@ -18,3 +18,5 @@ with open(_config_path, "r", encoding="utf-8") as f:
 DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
 QWEN_API_KEY: str = os.getenv("QWEN_API_KEY", "")
 QWEN_BASE_URL: str = os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+FEISHU_APP_ID: str = os.getenv("FEISHU_APP_ID", "")
+FEISHU_APP_SECRET: str = os.getenv("FEISHU_APP_SECRET", "")
