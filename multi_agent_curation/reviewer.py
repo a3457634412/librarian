@@ -8,11 +8,13 @@
   python reviewer.py 2026-06-03          # 评测指定日期
 """
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
-import os
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from openai import OpenAI
 
 from config import QWEN_API_KEY, QWEN_BASE_URL

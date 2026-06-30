@@ -231,13 +231,29 @@ __RELATED_PAGES__
   "target_page": "agent/架构/记忆架构.md",
   "insert_after": "## 长期记忆方案",
   "rationale": "补充 MemOS 与 LangMem 的对比数据",
-  "content": "### MemOS\\n\\n- 核心思路: ...\\n- 与 LangMem 对比: ..."
+  "content": "### MemOS\\n\\n- 核心思路: ...\\n- 与 LangMem 对比: ...",
+  "change_significance": "substantial",
+  "impact_scope": "Agent 记忆架构",
+  "impact_degree": "重要补充",
+  "push_digest": "MemOS 是专为 Agent 设计的操作系统式记忆方案。\\n与 LangMem 相比，MemOS 提供更结构化的记忆分层，\\n包括工作记忆、情景记忆、语义记忆三个层级。\\n两者代表了 Agent 记忆从'应用层补丁'向'系统级服务'的转变。"
 }
 
 决策类型:
 - **merge**: 补充价值，追加到已有页面。优先选这个
 - **create**: 全新方向，wiki 确定无覆盖。需谨慎
 - **skip**: 已有覆盖 / 信息密度不足 / 纯新闻
+
+change_significance — 这次改动对知识库的实际影响:
+- **paradigm_shift**: 推翻了已有页面的核心结论、替换旧方案、改写认知
+- **new_direction**: 创建全新页面，代表一个之前未覆盖的方向
+- **substantial**: 在已有页面中补充了重要的新信息（新对比、新方案、新数据）
+- **minor**: 小补充，已有页面的渐进更新
+- **none**: skip 时用这个
+
+推送字段（仅 merge/create 时填写，skip 可不填）:
+- **impact_scope**: 这个技术/变化影响 Agent 领域的哪个子方向（3-8字）
+- **impact_degree**: 影响程度 — "范式转移" / "重要补充" / "渐进优化"
+- **push_digest**: 3-5句完整摘要，让读者看完就知道发生了什么、意味着什么。包含关键数据和比较
 
 写前护栏:
 - 已有页面是否已覆盖此内容 >50%? → skip

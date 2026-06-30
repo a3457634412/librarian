@@ -1,7 +1,7 @@
 """
 Librarian Agent — 主编排器
 
-管线: 抓取 → tagger (过滤+摘要) → 写 Obsidian → 策展 → 归档
+管线: 抓取 → tagger (过滤+摘要) → 写 Obsidian → 策展 → 推送 → 归档
 
 用法:
   python agent.py                        # 完整 cron 运行
@@ -22,6 +22,7 @@ import tagger
 import obsidian_writer
 import curator
 import archiver
+import notifier
 from models import ArticleStore
 
 
@@ -61,13 +62,20 @@ def process_incoming(articles: list[dict], date_str: str, store: ArticleStore = 
         obsidian_writer.write_manual_markdown(tagged, date_str)
 
     # ── 3. 策展 ──
+    decisions = []
     try:
         cur = curator.Curator()
-        cur.curate(tagged, date_str)
+        decisions = cur.curate(tagged, date_str)
     except Exception as e:
         print(f"  ⚠️ 策展失败: {e}")
 
-    # ── 4. 归档 ──
+    # ── 4. 推送 ──
+    try:
+        _push_signals(tagged, decisions, date_str)
+    except Exception as e:
+        print(f"  ⚠️ 推送失败: {e}")
+
+    # ── 5. 归档 ──
     try:
         archiver.archive(date_str)
     except Exception as e:
@@ -158,6 +166,65 @@ def daily_run(date_str: str = None):
           f"curated:{s['by_state'].get('curated', 0)} "
           f"archived:{s['by_state'].get('archived', 0)})")
     print(f"{'='*50}")
+
+
+def _push_signals(tagged: list[dict], decisions: list[dict], date_str: str):
+    """综合 tagger priority + curator change_significance → 推送"""
+    dec_map = {d.get("title", ""): d for d in decisions}
+
+    signals = []
+
+    for a in tagged:
+        title = a.get("title", "")
+        tag_pri = a.get("push_priority", "low")
+        dec = dec_map.get(title, {})
+        cur_sig = dec.get("change_significance", "none")
+        decision = dec.get("decision", "skip")
+
+        if decision == "skip":
+            continue
+
+        level = None
+        if cur_sig == "paradigm_shift":
+            level = "🔴"
+        elif cur_sig in ("new_direction", "substantial"):
+            level = "🟡"
+
+        if level:
+            scope = dec.get("impact_scope", "")
+            degree = dec.get("impact_degree", "")
+            digest = dec.get("push_digest", "")
+            target = dec.get("target_page", "")
+            signals.append((level, title, scope, degree, digest, target))
+
+    if not signals:
+        return
+
+    signals.sort(key=lambda s: 0 if s[0] == "🔴" else 1)
+
+    date_short = date_str[5:]
+    lines = [f"📡 {date_short} Agent 信号"]
+
+    for level, title, scope, degree, digest, target in signals:
+        header = f"{level} {title}"
+        if scope:
+            header += f" — {scope}"
+        lines.append("")
+        lines.append(header)
+
+        if degree:
+            lines.append(f"   影响程度: {degree}")
+        if digest:
+            lines.append("")
+            for line in digest.strip().split("\n"):
+                lines.append(f"   {line.strip()}")
+        if target:
+            lines.append("")
+            lines.append(f"   → {target}")
+
+    msg = "\n".join(lines)
+    print(f"\n  推送 {len(signals)} 条信号...")
+    notifier.push(msg)
 
 
 if __name__ == "__main__":
